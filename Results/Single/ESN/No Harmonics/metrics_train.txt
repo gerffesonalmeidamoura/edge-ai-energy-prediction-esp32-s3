@@ -1,0 +1,8 @@
+[Train] MAE: 0.7852
+[Train] RMSE: 1.0204
+[Train] R²: 0.9662
+
+[Validation] MAE: 0.9049
+[Validation] RMSE: 1.1495
+[Validation] R²: 0.9557
+alpha: 0.01

@@ -1,0 +1,2 @@
+MAE(Keras vs INT8): 0.691873
+max abs diff: 1.629099
