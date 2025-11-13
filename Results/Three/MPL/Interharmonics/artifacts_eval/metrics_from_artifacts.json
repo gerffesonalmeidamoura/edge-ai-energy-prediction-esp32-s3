@@ -1,0 +1,8 @@
+{
+  "model": "modelo_final_quantizado.tflite",
+  "n_samples": 1064,
+  "feature_dim": 50,
+  "mae": 31.29241371154785,
+  "rmse": 39.579185485839844,
+  "r2": 0.9973452040329547
+}

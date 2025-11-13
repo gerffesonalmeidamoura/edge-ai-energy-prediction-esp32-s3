@@ -1,0 +1,3 @@
+val_mae: epoch 124, value 19.187737
+val_rmse: epoch 124, value 26.392757
+val_loss: epoch 124, value 19.187737
