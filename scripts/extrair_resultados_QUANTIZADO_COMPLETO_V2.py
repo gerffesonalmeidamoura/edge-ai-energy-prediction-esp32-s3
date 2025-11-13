@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 
 # === CONFIGURACAO PARA O MODELO QUANTIZADO ===
-pasta_modelo = "modelo_final"
+pasta_modelo = "modelo_final_quantizado"
 pasta_resultados_teste = "resultados_teste_quantizado"
 os.makedirs(pasta_modelo, exist_ok=True)
 os.makedirs(pasta_resultados_teste, exist_ok=True)

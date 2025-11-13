@@ -4,7 +4,7 @@ import random
 import shutil
 
 # Pasta de origem
-pasta_origem = "amostras_3dias_sem_harmonicas"
+pasta_origem = "dados_teste_3_dias"
 # Pasta de destino
 pasta_destino = os.path.join(pasta_origem, "teste")
 os.makedirs(pasta_destino, exist_ok=True)

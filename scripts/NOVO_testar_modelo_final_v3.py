@@ -1,96 +1,172 @@
 import os
+import numpy as np
 import glob
 import pickle
-import numpy as np
-import pandas as pd
-from tensorflow.keras.models import load_model
+import json
+import math
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+from sklearn.decomposition import IncrementalPCA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.utils import shuffle
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import tensorflow as tf
 
-# ——— Configurações ———
-pasta_modelo    = "modelo_final"
-pasta_amostras  = "teste"
-pasta_resultados = "resultados_teste"
-os.makedirs(pasta_resultados, exist_ok=True)
+# Seed for reproducibility
+tf.random.set_seed(42)
+np.random.seed(42)
 
-# mesmo downsampling usado no treinamento
-sample_step = 10  
+# Directories
+data_folder = "dados_teste_3_dias"
+model_folder = "modelo_final"
+os.makedirs(model_folder, exist_ok=True)
 
-# ——— Carregar modelo e PCA ———
-print(f"\n📦 Carregando modelo: {pasta_modelo}/modelo_final.keras")
-model = load_model(os.path.join(pasta_modelo, "modelo_final.keras"))
+# Collect and shuffle file paths and labels
+file_paths = sorted(glob.glob(f"{data_folder}/*.csv"))
+labels = [float(os.path.basename(p).split("_")[-1].replace(".csv", "")) for p in file_paths]
+file_paths, labels = shuffle(file_paths, labels, random_state=42)
 
-print(f"📦 Carregando PCA: {pasta_modelo}/pca.pkl")
-with open(os.path.join(pasta_modelo, "pca.pkl"), "rb") as f:
-    pca = pickle.load(f)
+# Determine number of features from the first file
+tmp = np.nan_to_num(np.loadtxt(file_paths[0], delimiter=",", dtype="float32"), nan=0.0)
+n_features = tmp.flatten().shape[0]
 
-# ——— Encontrar amostras de teste ———
-arquivos_csv = sorted(glob.glob(os.path.join(pasta_amostras, "*.csv")))
-print(f"\n🔍 Lendo {len(arquivos_csv)} amostras em '{pasta_amostras}'...\n")
+# PCA parameters
+dim = min(50, n_features)
+chunk_size = 16  # adjust for memory vs speed
 
-resultados = []
+# Initialize IncrementalPCA
+pca = IncrementalPCA(n_components=dim)
 
-# ——— Loop de inferência ———
-for path in tqdm(arquivos_csv, desc="Testando amostras"):
-    try:
-        # 1) Leitura com pandas (igual ao treinamento)
-        df = pd.read_csv(path)
-        df = df.drop(df.columns[0], axis=1)                          # remove coluna de tempo
-        df = df.loc[:, ~df.columns.str.startswith("Unnamed")]        # descarta colunas vazias
-        df = df.fillna(0.0)
-        # 2) Downsampling temporal (se usado no treinamento)
-        df = df.iloc[::sample_step, :].reset_index(drop=True)
+# Initial PCA fit (ensure at least dim samples)
+init_samples = min(dim, len(file_paths))
+print(f"\n🚀 PCA initial batch with {init_samples} samples (n_components={dim})...")
+init_data = []
+for path in tqdm(file_paths[:init_samples], desc="Loading init batch"):
+    arr = np.nan_to_num(np.loadtxt(path, delimiter=",", dtype="float32"), nan=0.0)
+    init_data.append(arr.flatten())
+init_batch = np.vstack(init_data).astype("float32")
+pca.partial_fit(init_batch)
+del init_data, init_batch
 
-        # 3) Flatten e reshape
-        arr = df.to_numpy(dtype="float32").flatten().reshape(1, -1)
+# Continue partial_fit in chunks for speed
+print(f"\n🚀 Continuing PCA partial_fit in chunks of {chunk_size}...")
+for start in tqdm(range(init_samples, len(file_paths), chunk_size), desc="PCA Partial Fit"):
+    end = min(start + chunk_size, len(file_paths))
+    batch = []
+    for p in file_paths[start:end]:
+        arr = np.nan_to_num(np.loadtxt(p, delimiter=",", dtype="float32"), nan=0.0)
+        batch.append(arr.flatten())
+    batch_arr = np.vstack(batch).astype("float32")
+    pca.partial_fit(batch_arr)
+    del batch, batch_arr
 
-        # 4) Verificar compatibilidade de shape
-        if arr.shape[1] != pca.n_features_in_:
-            print(f"⚠️ Shape mismatch: {os.path.basename(path)} → {arr.shape[1]} vs {pca.n_features_in_}")
-            continue
+# Transform into PCA space
+print("\n🔍 Transforming files with PCA...")
+X_pca_list = []
+for start in tqdm(range(0, len(file_paths), chunk_size), desc="PCA Transform"):
+    end = min(start + chunk_size, len(file_paths))
+    batch = []
+    for p in file_paths[start:end]:
+        arr = np.nan_to_num(np.loadtxt(p, delimiter=",", dtype="float32"), nan=0.0)
+        batch.append(arr.flatten())
+    arr_batch = np.vstack(batch).astype("float32")
+    X_pca_list.append(pca.transform(arr_batch))
+    del batch, arr_batch
+X_pca = np.vstack(X_pca_list)
+y_full = np.array(labels, dtype="float32")
 
-        # 5) PCA → predição
-        X_pca = pca.transform(arr)
-        y_pred = model.predict(X_pca).flatten()[0]
+print(f"\n✅ X_pca shape: {X_pca.shape}")
+print(f"✅ y_full shape: {y_full.shape}")
 
-        # 6) Extrair valor real do nome do arquivo
-        valor_real = float(os.path.basename(path).split("_")[-1].replace(".csv", ""))
-        resultados.append((os.path.basename(path), valor_real, y_pred))
-
-    except Exception as e:
-        print(f"⚠️ Erro em {os.path.basename(path)}: {e}")
-
-# ——— Salvar resultados brutos ———
-df_res = pd.DataFrame(resultados, columns=["amostra", "valor_real", "valor_predito"])
-df_res.to_csv(os.path.join(pasta_resultados, "resultados.csv"), index=False)
-
-# ——— Correção polinomial grau 2 ———
-coef2, coef1, coef0 = np.polyfit(df_res["valor_predito"], df_res["valor_real"], deg=2)
-df_res["valor_predito_corrigido"] = (
-    coef2 * df_res["valor_predito"]**2 +
-    coef1 * df_res["valor_predito"] +
-    coef0
+# Build model with normalization and callbacks
+model = Sequential([
+    Dense(128, activation="relu", input_shape=(dim,)),
+    BatchNormalization(),
+    Dropout(0.3),
+    Dense(64, activation="relu"),
+    BatchNormalization(),
+    Dropout(0.3),
+    Dense(1)
+])
+model.compile(
+    optimizer=Adam(learning_rate=0.001),
+    loss="mae",
+    metrics=["mae"]
 )
-df_res.to_csv(os.path.join(pasta_resultados, "resultados_corrigidos.csv"), index=False)
 
-print(f"\n✅ Coeficientes de correção polinomial grau 2:")
-print(f"   → a2 (quadrático): {coef2:.8f}")
-print(f"   → a1 (linear):     {coef1:.8f}")
-print(f"   → a0 (constante):  {coef0:.8f}")
+callbacks = [
+    EarlyStopping(monitor="val_loss", patience=20, restore_best_weights=True),
+    ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10)
+]
 
-# ——— Métricas finais ———
-mae  = np.mean(np.abs(df_res["valor_real"] - df_res["valor_predito_corrigido"]))
-rmse = np.sqrt(np.mean((df_res["valor_real"] - df_res["valor_predito_corrigido"])**2))
-ss_res = np.sum((df_res["valor_real"] - df_res["valor_predito_corrigido"])**2)
-ss_tot = np.sum((df_res["valor_real"] - np.mean(df_res["valor_real"]))**2)
-r2    = 1 - (ss_res / ss_tot)
+# Train using validation_split and shuffled batches
+print("\n🚀 Training model...")
+hist = model.fit(
+    X_pca, y_full,
+    validation_split=0.2,
+    batch_size=64,
+    epochs=400,
+    shuffle=True,
+    callbacks=callbacks,
+    verbose=2
+)
 
-with open(os.path.join(pasta_resultados, "metrics_test.txt"), "w") as f:
-    f.write(f"MAE: {mae:.4f}\n")
-    f.write(f"RMSE: {rmse:.4f}\n")
-    f.write(f"R²: {r2:.4f}\n")
+# Evaluate on full dataset
+print("\n🔍 Evaluating model on full dataset...")
+y_pred = model.predict(X_pca, verbose=0).flatten()
+mae = mean_absolute_error(y_full, y_pred)
+rmse = math.sqrt(mean_squared_error(y_full, y_pred))
+r2 = r2_score(y_full, y_pred)
+print(f"\n🎯 Final model - MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.4f}")
 
-print(f"\n✅ Resultados salvos em:\n"
-      f"   → {pasta_resultados}/resultados.csv\n"
-      f"   → {pasta_resultados}/resultados_corrigidos.csv ({len(df_res)} amostras)\n")
-print("\n🎯 Final TEST metrics (after polynomial correction):")
-print(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | R²: {r2:.4f}")
+# Save artifacts
+model.save(os.path.join(model_folder, "modelo_final.keras"))
+with open(os.path.join(model_folder, "pca.pkl"), "wb") as f:
+    pickle.dump(pca, f)
+np.save(os.path.join(model_folder, "X_pca_final.npy"), X_pca)
+np.save(os.path.join(model_folder, "y_final.npy"), y_full)
+
+# Convert history to native Python floats before JSON serialization
+history_clean = {key: [float(val) for val in values] for key, values in hist.history.items()}
+with open(os.path.join(model_folder, "training_history.json"), "w") as f:
+    json.dump(history_clean, f, indent=2)
+
+# Save metrics
+with open(os.path.join(model_folder, "metricas.txt"), "w") as f:
+    f.write(f"MAE: {mae:.2f}\n")
+    f.write(f"RMSE: {rmse:.2f}\n")
+    f.write(f"R2: {r2:.4f}\n")
+
+# Plotting function
+def plot_training_graphs(history, output_folder):
+    plt.figure(figsize=(8,6))
+    plt.plot(history["loss"], label="Train Loss (MAE)")
+    plt.plot(history["val_loss"], label="Validation Loss (MAE)")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss (MAE)")
+    plt.title("Training & Validation Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_folder, "training_validation_loss.png"))
+    plt.close()
+
+    if "mae" in history and "val_mae" in history:
+        plt.figure(figsize=(8,6))
+        plt.plot(history["mae"], label="Train MAE")
+        plt.plot(history["val_mae"], label="Validation MAE")
+        plt.xlabel("Epoch")
+        plt.ylabel("MAE")
+        plt.title("Training & Validation MAE")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, "training_validation_mae.png"))
+        plt.close()
+
+plot_training_graphs(history_clean, model_folder)
+
+print("\n✅ Process completed with smooth learning curves and serializable history.")

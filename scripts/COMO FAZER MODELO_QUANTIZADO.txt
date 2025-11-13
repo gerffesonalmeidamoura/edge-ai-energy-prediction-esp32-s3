@@ -1,0 +1,6 @@
+1.
+NOVO_treinamento_QUANTIZADO_v3_OK
+2.
+NOVO_GERAR_QUANTIZADO.py
+3.
+NOVO_testar_modelo_QUANTIZADO_final_v3.py

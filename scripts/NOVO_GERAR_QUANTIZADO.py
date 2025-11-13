@@ -1,43 +1,40 @@
 import os
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import load_model
+import pickle
 
-# ─── Paths ─────────────────────────────────────────────────────────────────────
-model_dir       = "modelo_final"
-quant_dir       = "modelo_final_quantizado"
-os.makedirs(quant_dir, exist_ok=True)
+# Caminhos
+pasta_modelo = "modelo_final_quantizado"
+modelo_keras_path = os.path.join(pasta_modelo, "modelo_final.keras")
+pca_path = os.path.join(pasta_modelo, "pca.pkl")
+X_pca_path = os.path.join(pasta_modelo, "X_pca_final.npy")
+tflite_saida = os.path.join(pasta_modelo, "modelo_final_quantizado.tflite")
 
-keras_model_fp  = os.path.join(model_dir, "modelo_final.keras")
-x_pca_fp        = os.path.join(model_dir, "X_pca_final.npy")
-tflite_out_fp   = os.path.join(quant_dir, "modelo_final_quantizado.tflite")
+print("📦 Recarregando modelo e dados salvos...")
 
-# ─── Load Keras model & calibration data ───────────────────────────────────────
-print("📦 Loading Keras model...")
-model = load_model(keras_model_fp)
+# Carregar modelo Keras já treinado
+model = tf.keras.models.load_model(modelo_keras_path)
 
-print("🔍 Loading PCA-transformed samples for calibration...")
-X_pca = np.load(x_pca_fp)
+# Carregar dados para calibragem
+X_pca = np.load(X_pca_path)
 
-# ─── Representative dataset generator ─────────────────────────────────────────
+# Função de calibragem para TFLite
 def representative_dataset():
-    for i in range(min(100, X_pca.shape[0])):
-        # yield a batch of shape (1, n_components)
-        yield [X_pca[i : i + 1].astype(np.float32)]
+    for i in range(min(200, len(X_pca))):
+        yield [X_pca[i:i+1].astype(np.float32)]
 
-# ─── Convert to TFLite with post‑training INT8 quantization ────────────────────
-print("⚙️ Converting to TFLite (INT8 quantization)...")
+# Conversor TFLite com quantização e calibragem
+print("⚙️ Reconvertendo para TFLite com quantização real...")
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
 converter.representative_dataset = representative_dataset
-converter.target_spec.supported_ops   = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-converter.inference_input_type        = tf.int8
-converter.inference_output_type       = tf.int8
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]  # Opcional: INT8 puro
+converter.inference_input_type = tf.float32
+converter.inference_output_type = tf.float32
 
+# Gerar e salvar modelo TFLite
 tflite_model = converter.convert()
-
-# ─── Write out the quantized model ─────────────────────────────────────────────
-with open(tflite_out_fp, "wb") as f:
+with open(tflite_saida, "wb") as f:
     f.write(tflite_model)
 
-print(f"\n✅ Quantized TFLite model saved to:\n   {tflite_out_fp}")
+print(f"✅ Novo modelo quantizado TFLite salvo com sucesso em:\n→ {tflite_saida}")

@@ -21,7 +21,7 @@ np.random.seed(42)
 tf.random.set_seed(42)
 
 # Pastas
-data_folder = "amostras_temporarias"
+data_folder = "dados_teste_3_dias"
 quant_folder = "modelo_final_quantizado"
 os.makedirs(quant_folder, exist_ok=True)
 
@@ -42,18 +42,18 @@ pca = IncrementalPCA(n_components=n_components)
 for i in tqdm(range(0, len(arquivos_csv), batch_size_pca), desc="PCA Fit"):
     batch = []
     for path in arquivos_csv[i:i+batch_size_pca]:
-        arr = np.nan_to_num(np.loadtxt(path, delimiter=",", skiprows=1), nan=0.0)
+        arr = np.nan_to_num(np.loadtxt(path, delimiter=","), nan=0.0)
         batch.append(arr.flatten())
     batch_arr = np.vstack(batch).astype("float32")
     pca.partial_fit(batch_arr)
 
-# Transformacao PCA
+# Transformação
 print("\n🔍 Transformando dados com PCA...")
 X_pca = []
 y_full = []
 
 for path in tqdm(arquivos_csv, desc="PCA Transform"):
-    arr = np.nan_to_num(np.loadtxt(path, delimiter=",", skiprows=1), nan=0.0)
+    arr = np.nan_to_num(np.loadtxt(path, delimiter=","), nan=0.0)
     X_pca.append(pca.transform(arr.flatten().reshape(1, -1))[0])
     y_full.append(float(os.path.basename(path).split("_")[-1].replace(".csv", "")))
 
@@ -62,12 +62,6 @@ y_full = np.array(y_full, dtype="float32")
 
 print(f"✅ X_pca shape: {X_pca.shape}")
 print(f"✅ y_full shape: {y_full.shape}")
-
-# 📂 Salvar arquivos do PCA
-with open(os.path.join(quant_folder, "pca.pkl"), "wb") as f:
-    pickle.dump(pca, f)
-np.save(os.path.join(quant_folder, "X_pca_final.npy"), X_pca)
-np.save(os.path.join(quant_folder, "y_final.npy"), y_full)
 
 # Modelo com BatchNorm e callbacks
 model = Sequential([
@@ -102,7 +96,7 @@ hist = model.fit(
 # Salvar modelo original
 model.save(os.path.join(quant_folder, "modelo_final.keras"))
 
-# Quantização seletiva
+# Quantização seletiva - somente Dense
 from tensorflow_model_optimization.quantization.keras import quantize_annotate_layer, quantize_apply
 
 print("\n🔧 Anotando camadas Dense para quantização...")
@@ -121,13 +115,13 @@ quantized_model = quantize_apply(annotated_model)
 quantized_model.compile(optimizer=Adam(1e-3), loss="mae", metrics=["mae"])
 quantized_model.save(os.path.join(quant_folder, "modelo_final_quantizado.keras"))
 
-# Dataset representativo
+# Função correta de representative_dataset
 def representative_dataset():
     for i in range(min(200, len(X_pca))):
         input_data = np.expand_dims(X_pca[i].astype(np.float32), axis=0)
         yield [input_data]
 
-# Converter para TFLite
+# Conversão para TFLite
 print("\n📦 Convertendo para TFLite...")
 converter = tf.lite.TFLiteConverter.from_keras_model(quantized_model)
 converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -137,7 +131,7 @@ tflite_model = converter.convert()
 with open(os.path.join(quant_folder, "modelo_quant.tflite"), "wb") as f:
     f.write(tflite_model)
 
-# Avaliação
+# Métricas
 y_pred = model.predict(X_pca).flatten()
 mae = mean_absolute_error(y_full, y_pred)
 rmse = math.sqrt(mean_squared_error(y_full, y_pred))
@@ -153,14 +147,12 @@ history_clean = {k: [float(x) for x in v] for k, v in hist.history.items()}
 with open(os.path.join(quant_folder, "training_history.json"), "w") as f:
     json.dump(history_clean, f, indent=2)
 
-# Função de plotagem dupla (MAE e Loss)
-def plot_training_curves(history, folder):
-    epochs = range(1, len(history["loss"]) + 1)
-
-    # MAE
+# Gráfico com unidades
+def plot_curves(hist, folder):
+    epochs = range(1, len(hist["loss"]) + 1)
     plt.figure(figsize=(8,6))
-    plt.plot(epochs, history["mae"], label="Train MAE (kWh)")
-    plt.plot(epochs, history["val_mae"], label="Val MAE (kWh)")
+    plt.plot(epochs, hist["loss"], label="Train MAE (kWh)")
+    plt.plot(epochs, hist["val_loss"], label="Val MAE (kWh)")
     plt.xlabel("Epoch")
     plt.ylabel("MAE (kWh)")
     plt.title("Training & Validation MAE")
@@ -170,19 +162,6 @@ def plot_training_curves(history, folder):
     plt.savefig(os.path.join(folder, "training_validation_mae_kwh.png"))
     plt.close()
 
-    # Loss (igual ao MAE)
-    plt.figure(figsize=(8,6))
-    plt.plot(epochs, history["loss"], label="Train Loss (kWh)")
-    plt.plot(epochs, history["val_loss"], label="Val Loss (kWh)")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss (kWh)")
-    plt.title("Training & Validation Loss")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(folder, "training_validation_loss_kwh.png"))
-    plt.close()
+plot_curves(history_clean, quant_folder)
 
-plot_training_curves(history_clean, quant_folder)
-
-print("\n✅ Tudo pronto! Modelos, métricas e gráficos salvos.")
+print("\n✅ Tudo pronto! Gráficos sem offset e com unidades.")
