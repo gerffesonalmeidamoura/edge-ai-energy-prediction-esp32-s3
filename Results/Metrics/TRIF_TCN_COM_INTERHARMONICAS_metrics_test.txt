@@ -1,0 +1,4 @@
+MAE: 87.60 kWh
+RMSE: 112.00 kWh
+R²: 0.9763
+Erro Percentual Médio: 3.48%
