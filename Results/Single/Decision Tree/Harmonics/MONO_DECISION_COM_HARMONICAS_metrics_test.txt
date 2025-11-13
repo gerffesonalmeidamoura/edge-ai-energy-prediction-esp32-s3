@@ -1,0 +1,4 @@
+MAE: 16.53
+RMSE: 21.74
+R²: 0.8499
+Erro Percentual Médio: 4.97%
