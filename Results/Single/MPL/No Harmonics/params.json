@@ -1,0 +1,13 @@
+{
+  "n_components": 50,
+  "batch_size_train": 64,
+  "max_epochs": 400,
+  "val_split": 0.2,
+  "optimizer": "Adam",
+  "lr_start": 0.001,
+  "loss": "mae",
+  "metrics": [
+    "mae",
+    "rmse"
+  ]
+}

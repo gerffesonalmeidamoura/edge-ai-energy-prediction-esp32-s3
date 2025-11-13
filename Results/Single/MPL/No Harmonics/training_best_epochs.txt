@@ -1,0 +1,2 @@
+best val MAE = 0.469 kWh at epoch 155
+best val RMSE = 0.628 kWh at epoch 155
