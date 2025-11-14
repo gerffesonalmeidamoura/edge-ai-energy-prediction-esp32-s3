@@ -36,8 +36,7 @@ Quantization - Inference - Metric extraction - Visualization
   Reproduction Steps
   --------------------
 
-1.  Generate 3-day combinations Run: scripts/gerar_3_dias_V2.py Output:
-    4060 window combinations
+1.  Generate 3-day combinations Run: scripts/gerar_3_dias_V2.py
 
 2.  Random train/test split Run: scripts/sortear.py
 
